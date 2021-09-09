@@ -9,10 +9,14 @@ namespace PCSC.Iso7816
     /// <summary>A ISO/IEC 7816 compliant reader.</summary>
     public class IsoReader : IIsoReader
     {
+        private const int DefaultMaxReceiveSize = 128;
+
         private readonly ISCardContext _context;
         private readonly bool _releaseContextOnDispose;
         private readonly bool _disconnectReaderOnDispose;
         private readonly ISCardReader _reader;
+
+        private int _maxReceiveSize = DefaultMaxReceiveSize;
 
         /// <summary>Gets the name of the reader.</summary>
         public string ReaderName => _reader.ReaderName;
@@ -27,9 +31,12 @@ namespace PCSC.Iso7816
         /// <value>Default is 0 ms</value>
         public virtual int RetransmitWaitTime { get; set; }
 
-        /// <summary>Gets the maximum number of bytes that can be received.</summary>
+        /// <summary>Gets the maximum number of bytes that can be received (le) when using a <see cref="InstructionCode.GetResponse"/> command.</summary>
         /// <value>Default is 128 bytes.</value>
-        public virtual int MaxReceiveSize { get; protected set; } = 128;
+        public virtual int MaxReceiveSize {
+            get => _maxReceiveSize;
+            protected set => _maxReceiveSize = value;
+        }
 
         /// <summary>Finalizes an instance of the <see cref="IsoReader" /> class.</summary>
         ~IsoReader() {
@@ -76,7 +83,19 @@ namespace PCSC.Iso7816
         /// <param name="releaseContextOnDispose">if set to <c>true</c> the <paramref name="context" /> will be released on <see cref="Dispose()" />.</param>
         public IsoReader(ISCardContext context, string readerName, SCardShareMode mode, SCardProtocol protocol,
             bool releaseContextOnDispose = true)
+            : this(context, readerName, mode, protocol, releaseContextOnDispose, DefaultMaxReceiveSize) {}
+
+        /// <summary>Initializes a new instance of the <see cref="IsoReader" /> class that will create its own instance of a <see cref="SCardReader" /> and immediately connect.</summary>
+        /// <param name="context">A context to the PC/SC Resource Manager.</param>
+        /// <param name="readerName">Name of the reader to connect with.</param>
+        /// <param name="mode">The share mode.</param>
+        /// <param name="protocol">The communication protocol. <seealso cref="ISCardReader.Connect(string,SCardShareMode,SCardProtocol)" /></param>
+        /// <param name="releaseContextOnDispose">if set to <c>true</c> the <paramref name="context" /> will be released on <see cref="Dispose()" />.</param>
+        /// <param name="maxReceiveSize">Sets the maximum number of bytes that can be received (Le) when using a <see cref="InstructionCode.GetResponse"/> command.</param>
+        public IsoReader(ISCardContext context, string readerName, SCardShareMode mode, SCardProtocol protocol,
+            bool releaseContextOnDispose, int maxReceiveSize)
             : this(context, releaseContextOnDispose) {
+            _maxReceiveSize = maxReceiveSize;
             Connect(readerName, mode, protocol);
         }
 
@@ -131,7 +150,7 @@ namespace PCSC.Iso7816
 
                 // Do we need to resend the command APDU?
                 if (sc.HasInsufficientBuffer() && receiveBuffer.Length < receiveBufferLength) {
-                    // The response buffer was too small. 
+                    // The response buffer was too small.
                     receiveBuffer = new byte[receiveBufferLength];
 
                     // Shall we wait until we re-send we APDU?
@@ -153,9 +172,19 @@ namespace PCSC.Iso7816
         /// <summary>Transmits the specified command APDU.</summary>
         /// <param name="commandApdu">The command APDU.</param>
         /// <returns>A response containing one ore more <see cref="ResponseApdu" />.</returns>
-        public virtual Response Transmit(CommandApdu commandApdu) {
+        public virtual Response Transmit(CommandApdu commandApdu) => Transmit(commandApdu, ConstructGetResponseApdu);
+
+        /// <summary>Transmits the specified command APDU.</summary>
+        /// <param name="commandApdu">The command APDU.</param>
+        /// <param name="constructGetResponse">A method that will be called if the card signals more data available (SW1=0x61)</param>
+        /// <returns>A response containing one ore more <see cref="ResponseApdu" />.</returns>
+        public virtual Response Transmit(CommandApdu commandApdu, ConstructGetResponse constructGetResponse) {
             if (commandApdu == null) {
                 throw new ArgumentNullException(nameof(commandApdu));
+            }
+
+            if (constructGetResponse == null) {
+                throw new ArgumentNullException(nameof(constructGetResponse));
             }
 
             // prepare send buffer (Check Command APDU and convert it to an byte array)
@@ -187,7 +216,7 @@ namespace PCSC.Iso7816
             }
 
             /* Check status word SW1SW2:
-             * 
+             *
              * 1. 0x6cxx -> Set response buffer size Le <- SW2
              * 2. AND/OR 0x61xx -> More data can be read with GET RESPONSE
              */
@@ -201,7 +230,7 @@ namespace PCSC.Iso7816
 
             if (responseApdu.SW1 == (byte) SW1Code.NormalDataResponse) {
                 // Case 2: SW1=0x61, More data available -> GET RESPONSE
-                responseApdu = IssueGetResponseCommand(commandApdu, responseApdu, response, receivePci);
+                responseApdu = IssueGetResponseCommand(commandApdu, responseApdu, response, receivePci, constructGetResponse);
             }
 
             response.Add(responseApdu);
@@ -210,24 +239,29 @@ namespace PCSC.Iso7816
             return response;
         }
 
-        private ResponseApdu IssueGetResponseCommand(CommandApdu commandApdu, ResponseApdu lastResponseApdu,
-            Response response, SCardPCI receivePci) {
+        private ResponseApdu IssueGetResponseCommand(
+            CommandApdu commandApdu,
+            ResponseApdu previousResponseApdu,
+            Response response,
+            SCardPCI receivePci,
+            ConstructGetResponse constructGetResponse) {
             /* The transmission system shall issue a GET RESPONSE command APDU (or TPDU)
-             * to the card by assigning the minimum of SW2 and Le to parameter Le (or P3)). 
+             * to the card by assigning the minimum of SW2 and Le to parameter Le (or P3)).
              * Le = Le > 0 ? min(Le,SW2) : SW2
              * http://www.cardwerk.com/smartcards/smartcard_standard_ISO7816-4_annex-a.aspx#AnnexA_4
              */
-            var le = (commandApdu.Le > 0) && (commandApdu.Le < lastResponseApdu.SW2)
+            var le = (commandApdu.Le > 0) && (commandApdu.Le < previousResponseApdu.SW2)
                 ? commandApdu.Le
-                : lastResponseApdu.SW2;
+                : previousResponseApdu.SW2;
 
-            var responseApdu = lastResponseApdu;
+            var responseApdu = previousResponseApdu;
             do {
                 // add the last ResponseAPDU to the Response object
                 response.Add(responseApdu);
                 response.Add(receivePci);
 
-                var getResponseApdu = ConstructGetResponseApdu(ref le);
+                var getResponseApdu = constructGetResponse(commandApdu, responseApdu, le);
+                le = getResponseApdu.Le;
 
                 // +2 bytes for status word
                 var receiveBufferLength = le == 0
@@ -292,7 +326,7 @@ namespace PCSC.Iso7816
             try {
                 var sendBuffer = resendCmdApdu.ToArray();
 
-                // Shall we wait until we re-send we APDU/TPDU?
+                // Shall we wait until we re-send the APDU/TPDU?
                 if (RetransmitWaitTime > 0) {
                     Thread.Sleep(RetransmitWaitTime);
                 }
@@ -316,7 +350,14 @@ namespace PCSC.Iso7816
             }
         }
 
-        private CommandApdu ConstructGetResponseApdu(ref int le) {
+        /// <summary>
+        /// Creates a GET RESPONSE command after receiving SW1=0x61 (More data available)
+        /// </summary>
+        /// <param name="initialCommand">The initial command that has been sent to the card</param>
+        /// <param name="previousResponse">The received response</param>
+        /// <param name="le">The expected size</param>
+        /// <returns>A GET RESPONSE APDU</returns>
+        protected virtual CommandApdu ConstructGetResponseApdu(CommandApdu initialCommand, ResponseApdu previousResponse, int le) {
             var commandApdu = ConstructCommandApdu(IsoCase.Case2Short);
 
             if (le > 255 || le < 0) {
@@ -328,11 +369,11 @@ namespace PCSC.Iso7816
                 le = MaxReceiveSize;
             }
 
-            commandApdu.Le = le;
-            commandApdu.CLA = 0x00;
+            commandApdu.CLA = initialCommand.CLA;
             commandApdu.Instruction = InstructionCode.GetResponse;
             commandApdu.P1 = 0x00;
             commandApdu.P2 = 0x00;
+            commandApdu.Le = le;
 
             return commandApdu;
         }

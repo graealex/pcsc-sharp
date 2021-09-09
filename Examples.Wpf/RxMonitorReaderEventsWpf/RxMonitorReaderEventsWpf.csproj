@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PCSC.Reactive\PCSC.Reactive.csproj" />
+    <ProjectReference Include="..\..\src\PCSC\PCSC.csproj" />
+    <PackageReference Include="System.Reactive" Version="4.3.*" />
+    <PackageReference Include="ReactiveProperty" Version="6.1.*" />
+  </ItemGroup>
+
+</Project>

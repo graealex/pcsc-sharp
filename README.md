@@ -29,20 +29,19 @@ You can find PC/SC specific documentation here:
 
 * Windows (winscard.dll)
 
-  * Windows 10 64-bit Professional (.Net Core 2.2, .Net Core 3.1 _confirmed_)
+  * Windows 11 64-bit
+  * Windows 10 64-bit Professional
   * Windows 10 32-bit Professional
-  * Windows 7 64-bit
-  * Windows 7 32-bit
 
 * Linux (PC/SC lite)
 
-  * Ubuntu Linux 64-bit (.Net Core 2.2 _confirmed_)
+  * Ubuntu Linux 64-bit
   * Ubuntu Linux 32-bit
 
-* MacOS X (.Net Core 2.2 _confirmed_)
+* MacOS X
 
 * Raspberry Pi / Linux ARM
-  * linux-arm (.Net Core 2.2 _confirmed_)
+  * linux-arm
 
 ## Quick start
 
@@ -141,29 +140,16 @@ Checkout the [Examples](https://github.com/danm-de/pcsc-sharp/tree/master/Exampl
 
 ### Required software
 
-Frameworks
-
-* .Net Core 2.2 SDK
-* .Net Core 3.0 SDK
-* .Net Core 3.1 SDK
-
 Build tools
 
-* [Fake](https://fake.build/fake-dotnetcore.html), Please run:
-  
-  ```bash
-   dotnet tool install fake-cli -g
-  ```
+* .Net 8.0 SDKs (Multi target build)
 
-  to install ```fake``` as global tool. On Linux you may have to add the following lines into your .profile or .bashrc file:
-  
-  ```bash
-  if [ -d "$HOME/.dotnet/tools" ] ; then
-    PATH="$HOME/.dotnet/tools:$PATH"
-  fi
-  ```
+Compile with
 
-_pcsc-sharp_ uses the great [FAKE](https://fake.build/) DSL for build tasks.  To build the solution, simply start the ```build.cmd``` on Windows or the ```build.sh``` shell script on Unix.
+```bash
+dotnet build -c Release
+```
+
 
 ### Build instructions for Raspberry Pi
 

@@ -7,15 +7,16 @@ namespace PCSC.Interop.MacOSX
     internal static class MacOsxNativeMethods
     {
         private static IntPtr _libHandle = IntPtr.Zero;
-        private const string PCSC_LIB = "PCSC.framework/PCSC";
+        private const string PCSC_LIB = "/System/Library/Frameworks/PCSC.framework/PCSC";
         private const string DL_LIB = "libdl.dylib";
 
         public static IntPtr GetSymFromLib(string symName) {
+            #if NETSTANDARD
             // Step 1. load dynamic link library
             if (_libHandle == IntPtr.Zero) {
                 _libHandle = dlopen(PCSC_LIB, (int) DLOPEN_FLAGS.RTLD_LAZY);
                 if (_libHandle.Equals(IntPtr.Zero)) {
-                    throw new Exception("PInvoke call dlopen() failed");
+                    throw new Exception("PInvoke call dlopen() failed. If you use MacOS Ventura please update to .NET6 SDK or .NET7 SDK.");
                 }
             }
 
@@ -25,8 +26,25 @@ namespace PCSC.Interop.MacOSX
             if (symPtr.Equals(IntPtr.Zero)) {
                 throw new Exception("PInvoke call dlsym() failed");
             }
+            return symPtr;
+            #else
+            // Step 1. load dynamic link library
+            if(_libHandle == IntPtr.Zero) {
+                if (!NativeLibrary.TryLoad(PCSC_LIB, out _libHandle)) {
+                    throw new Exception("NativeLibrary.TryLoad PCSC_LIB failed");
+                }
+            }
+
+            // Step 2. search symbol name in memory
+            var symPtr = NativeLibrary.GetExport(_libHandle, symName);
+
+            if (symPtr.Equals(IntPtr.Zero)) {
+                throw new Exception("NativeLibrary.GetExport() failed");
+            }
 
             return symPtr;
+            #endif
+
         }
 
         [DllImport(PCSC_LIB)]

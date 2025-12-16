@@ -33,6 +33,8 @@ namespace PCSC.Extensions
                     throw new InvalidProtocolException(sc);
                 case SCardError.InvalidValue:
                     throw new InvalidValueException(sc);
+                case SCardError.Shutdown | SCardError.InvalidHandleWindows:
+                    throw new NoServiceException(sc);
                 case SCardError.NoService:
                     throw new NoServiceException(sc);
                 case SCardError.NoSmartcard:
@@ -63,6 +65,8 @@ namespace PCSC.Extensions
                     throw new InsufficientBufferException(sc);
                 case SCardError.WinErrorInsufficientBuffer:
                     throw new WinErrorInsufficientBufferException(sc);
+                case SCardError.Timeout:
+                    throw new UserTimeoutException(sc);
                 default:
                     throw new PCSCException(sc); // Unexpected / unknown error
             }
